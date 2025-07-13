@@ -5,10 +5,17 @@ import re
 import json
 import os
 
+HEAD
 # === API Keys (now loaded from environment variables) ===
 API_KEY = os.getenv("GROQ_API_KEY")
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 SERPER_KEY = os.getenv("SERPER_KEY")
+
+# === API Keys ===
+API_KEY = "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"
+NEWSAPI_KEY = "3ca3c24b0bf743b28f2ea537701d37c3"
+SERPER_KEY = "b85c03c20472fad945f80e4005c976ce39c6fdad"
+0bd705e (Initial commit of AI Toolbox)
 
 # === Endpoints ===
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -52,6 +59,10 @@ def get_wikipedia_summary(query):
             if extract:
                 return extract
 
+<<<<<<< HEAD
+=======
+        # Fallback: Try to use simplified version of the original query
+>>>>>>> 0bd705e (Initial commit of AI Toolbox)
         fallback_title = cleaned_query.lower().replace(" ", "_")
         res_fallback = requests.get(WIKIPEDIA_URL + fallback_title)
         if res_fallback.status_code == 200:
@@ -161,6 +172,10 @@ if section == "💬 Chatbot":
 
         translated = translate_to_english(chat_input)
 
+<<<<<<< HEAD
+=======
+        # Detect educational queries
+>>>>>>> 0bd705e (Initial commit of AI Toolbox)
         is_educational = any(k in translated.lower() for k in ["what is", "who is", "who was", "explain", "define", "history of", "origin of", "when did", "how did"])
 
         if is_educational:
