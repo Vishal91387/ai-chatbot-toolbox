@@ -20,6 +20,12 @@ SERPER_KEY = "b85c03c20472fad945f80e4005c976ce39c6fdad"
 0bd705e (Initial commit of AI Toolbox)
 e9b7c1c (Sanitized API keys and secured credentials)
 
+# === Sidebar Key Check (Improved with Expander) ===
+with st.sidebar.expander("🔐 API Key Status", expanded=True):
+    st.text(f"GROQ_API_KEY loaded: {'✅' if API_KEY else '❌'}")
+    st.text(f"NEWSAPI_KEY loaded: {'✅' if NEWSAPI_KEY else '❌'}")
+    st.text(f"SERPER_KEY loaded: {'✅' if SERPER_KEY else '❌'}")
+
 # === Endpoints ===
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 SERPER_URL = "https://google.serper.dev/search"
@@ -94,7 +100,7 @@ def get_newsapi_headlines(query):
     articles = res.json().get("articles", [])
     if not articles:
         return None
-    return "\n".join([f"- {a['title']} (📅 {a['publishedAt'][:10]}, Source: {a['source']['name']})" for a in articles])
+    return "\n".join([f"- {a['title']} (🔕 {a['publishedAt'][:10]}, Source: {a['source']['name']})" for a in articles])
 
 # === Serper Fallback ===
 def get_serper_results(query):
@@ -146,22 +152,30 @@ section = st.sidebar.radio("Go to:", ["💬 Chatbot", "📄 Document Q&A"])
 
 uploaded_file = st.sidebar.file_uploader("Upload .txt or .pdf", type=["txt", "pdf"])
 document_text = ""
+
+# 🔁 Load previously uploaded documents for selection
+doc_choices = [f for f in os.listdir(UPLOAD_DIR) if f.endswith((".txt", ".pdf"))]
+selected_doc = st.sidebar.selectbox("📑 Choose a saved document:", ["None"] + doc_choices)
+
+if selected_doc != "None":
+    doc_path = os.path.join(UPLOAD_DIR, selected_doc)
+    if selected_doc.endswith(".txt"):
+        document_text = open(doc_path, "r", encoding="utf-8").read()
+    elif selected_doc.endswith(".pdf"):
+        with fitz.open(doc_path) as doc:
+            document_text = "\n".join(page.get_text() for page in doc)
+    st.sidebar.success(f"Selected: {selected_doc}")
+
+# 📥 Save newly uploaded document
 if uploaded_file:
     file_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
     with open(file_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
-
-    ext = uploaded_file.name.split(".")[-1].lower()
-    if ext == "txt":
-        document_text = open(file_path, "r", encoding="utf-8").read()
-    elif ext == "pdf":
-        with fitz.open(file_path) as doc:
-            document_text = "\n".join(page.get_text() for page in doc)
-    st.sidebar.success(f"{uploaded_file.name} uploaded and saved!")
+    st.sidebar.success(f"Uploaded & saved: {uploaded_file.name}")
 
 # === Chatbot UI ===
 if section == "💬 Chatbot":
-    st.title("🧠 AI Chatbot with Real-Time + Wikipedia Intelligence")
+    st.title("🧐 AI Chatbot with Real-Time + Wikipedia Intelligence")
 
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = load_memory()
@@ -224,7 +238,7 @@ if section == "📄 Document Q&A":
     st.title("📄 Ask Questions About Your Uploaded Document")
 
     if not document_text:
-        st.warning("Please upload a document first.")
+        st.warning("Please upload or select a document first.")
     else:
         q = st.text_input("What do you want to know?")
         if q:
