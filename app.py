@@ -5,18 +5,17 @@ import re
 import json
 import os
 from dotenv import load_dotenv
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.document_loaders import PyPDFLoader, TextLoader
+
 load_dotenv()
 
 API_KEY = os.getenv("GROQ_API_KEY")
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 SERPER_KEY = os.getenv("SERPER_KEY")
-
-with st.sidebar.expander("🔐 API Key Status", expanded=True):
-    st.text(f"GROQ_API_KEY loaded: {'✅' if API_KEY else '❌'}")
-    st.text(f"NEWSAPI_KEY loaded: {'✅' if NEWSAPI_KEY else '❌'}")
-    st.text(f"SERPER_KEY loaded: {'✅' if SERPER_KEY else '❌'}")
-
-st.sidebar.write("📂 Working Directory:", os.getcwd())
+EMBEDDING_MODEL = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 SERPER_URL = "https://google.serper.dev/search"
@@ -27,11 +26,15 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
+UPLOAD_DIR = "uploaded_docs"
+VECTOR_DIR = "vector_db"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(VECTOR_DIR, exist_ok=True)
+
 MAX_DOC_CHARS = 5000
 MEMORY_FILE = "chat_memory.json"
-UPLOAD_DIR = "uploaded_docs"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Load or save chat history
 def load_memory():
     if os.path.exists(MEMORY_FILE):
         with open(MEMORY_FILE, "r") as f:
@@ -41,6 +44,36 @@ def load_memory():
 def save_memory(chat_history):
     with open(MEMORY_FILE, "w") as f:
         json.dump(chat_history, f, indent=2)
+
+# Embed all documents once and store in vector DB
+def embed_documents():
+    docs = []
+    for file in os.listdir(UPLOAD_DIR):
+        path = os.path.join(UPLOAD_DIR, file)
+        if file.endswith(".txt"):
+            loader = TextLoader(path)
+        elif file.endswith(".pdf"):
+            loader = PyPDFLoader(path)
+        else:
+            continue
+        docs.extend(loader.load())
+
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    chunks = splitter.split_documents(docs)
+    vectordb = Chroma.from_documents(chunks, EMBEDDING_MODEL, persist_directory=VECTOR_DIR)
+    vectordb.persist()
+
+# Search vectors
+def search_similar_docs(query, selected=None):
+    vectordb = Chroma(persist_directory=VECTOR_DIR, embedding_function=EMBEDDING_MODEL)
+    if selected == "All" or not selected:
+        docs = vectordb.similarity_search(query, k=4)
+    else:
+        all_docs = vectordb.similarity_search(query, k=10)
+        docs = [doc for doc in all_docs if selected.lower() in doc.metadata.get("source", "").lower()][:3]
+    return "\n---\n".join([doc.page_content for doc in docs])
+
+# Wikipedia
 
 def get_wikipedia_summary(query):
     try:
@@ -55,6 +88,8 @@ def get_wikipedia_summary(query):
         return res.json().get("extract", "") if res.status_code == 200 else None
     except:
         return None
+
+# NewsAPI
 
 def get_newsapi_headlines(query):
     try:
@@ -72,6 +107,8 @@ def get_newsapi_headlines(query):
     except:
         return None
 
+# Serper
+
 def get_serper_results(query):
     try:
         headers = {"X-API-KEY": SERPER_KEY, "Content-Type": "application/json"}
@@ -81,6 +118,8 @@ def get_serper_results(query):
         return "\n".join([f"- {r['title']}\n  {r['snippet']}\n  🔗 {r['link']}" for r in items])
     except:
         return None
+
+# Translate
 
 def translate_to_english(text):
     try:
@@ -96,6 +135,8 @@ def translate_to_english(text):
         return res.json()["choices"][0]["message"]["content"].strip()
     except:
         return text
+
+# Ask Groq
 
 def ask_groq(question, context=None):
     messages = [
@@ -116,106 +157,65 @@ def ask_groq(question, context=None):
     except:
         return "⚠️ No response"
 
-def get_all_documents():
-    context = ""
-    for file in os.listdir(UPLOAD_DIR):
-        path = os.path.join(UPLOAD_DIR, file)
-        if file.endswith(".txt"):
-            context += open(path, "r", encoding="utf-8").read() + "\n"
-        elif file.endswith(".pdf"):
-            with fitz.open(path) as doc:
-                context += "\n".join(page.get_text() for page in doc) + "\n"
-    return context
+# UI setup
+st.sidebar.title("🧠 AI Toolbox")
+section = st.sidebar.radio("Select Mode", ["💬 Chatbot", "📄 Documents Q&A"])
 
-def get_document_context(filename):
-    path = os.path.join(UPLOAD_DIR, filename)
-    if filename.endswith(".txt"):
-        return open(path, "r", encoding="utf-8").read()
-    elif filename.endswith(".pdf"):
-        with fitz.open(path) as doc:
-            return "\n".join(page.get_text() for page in doc)
-    return ""
-
-st.sidebar.title("📂 Document Assistant")
-section = st.sidebar.radio("Go to:", ["💬 Chatbot", "📄 Document Q&A"])
-
-if st.sidebar.button("🧹 Clear Chat History"):
-    st.session_state.chat_history = []
-    save_memory([])
-    st.rerun()
-
+# Upload doc
 uploaded_file = st.sidebar.file_uploader("Upload .txt or .pdf", type=["txt", "pdf"])
 if uploaded_file:
-    file_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
-    if not os.path.exists(file_path):
-        with open(file_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        st.sidebar.success(f"✅ Saved: {uploaded_file.name}")
-        st.rerun()
+    with open(os.path.join(UPLOAD_DIR, uploaded_file.name), "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    embed_documents()
+    st.sidebar.success("File uploaded and indexed.")
+    st.rerun()
 
-if st.sidebar.button("📤 Push to GitHub"):
-    os.system("git add uploaded_docs/*")
-    os.system("git commit -m 'Add uploaded document(s)'")
-    os.system("git push origin main")
-    st.sidebar.success("✅ Pushed uploaded documents to GitHub")
-
-if section == "📄 Document Q&A":
-    st.title("📄 Ask Questions About Your Uploaded Document")
-
-    doc_files = [f for f in os.listdir(UPLOAD_DIR) if f.endswith((".txt", ".pdf"))]
-    selected = st.selectbox("📑 Select document to query:", ["All"] + doc_files, index=0)
+# === DOCUMENTS Q&A ===
+if section == "📄 Documents Q&A":
+    st.title("📄 Ask About Documents")
+    all_files = [f for f in os.listdir(UPLOAD_DIR) if f.endswith((".txt", ".pdf"))]
+    selected_doc = st.selectbox("Choose document to search in", ["All"] + all_files)
 
     question = st.text_input("What do you want to know?")
     if question:
-        with st.spinner("Reading documents..."):
+        with st.spinner("Searching documents..."):
             translated = translate_to_english(question)
-            if selected == "All":
-                all_docs = {f: get_document_context(f) for f in doc_files}
-                matching_docs = [text for name, text in all_docs.items() if re.search(translated[:40], text, re.IGNORECASE)]
-                context = "\n\n".join(matching_docs)
-            else:
-                context = get_document_context(selected)
-            answer = ask_groq(translated, context)
+            doc_context = search_similar_docs(translated, selected=selected_doc)
+            response = ask_groq(translated, doc_context)
             st.subheader("💡 Answer:")
-            st.write(answer)
+            st.write(response)
 
+# === SMART CHATBOT ===
 if section == "💬 Chatbot":
-    st.title("🧠 AI Chatbot with Smart Context")
-
+    st.title("🤖 Smart Chatbot with Web + Wiki + Docs")
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = load_memory()
         if not st.session_state.chat_history:
             st.session_state.chat_history = [
-                {"role": "system", "content": "You are a smart AI assistant with access to documents, Wikipedia, and real-time news. You handle questions like who, what, when, how many, how long, tell me how, tell me why, etc."}
+                {"role": "system", "content": "You are a smart assistant using documents, Wikipedia, and news sources."}
             ]
 
     for msg in st.session_state.chat_history[1:]:
         st.chat_message(msg["role"]).write(msg["content"])
 
-    chat_input = st.chat_input("Ask your assistant...")
+    chat_input = st.chat_input("Ask me anything...")
     if chat_input:
         st.chat_message("user").write(chat_input)
         st.session_state.chat_history.append({"role": "user", "content": chat_input})
 
         translated = translate_to_english(chat_input)
-
         wiki = get_wikipedia_summary(translated)
         news = get_newsapi_headlines(translated)
         serper = get_serper_results(translated)
-        docs = get_all_documents()
+        doc_context = search_similar_docs(translated)
 
-        combined_context = ""
-        if wiki:
-            combined_context += f"📚 Wikipedia:\n{wiki}\n\n"
-        if news:
-            combined_context += f"📡 NewsAPI:\n{news}\n\n"
-        if serper:
-            combined_context += f"🌐 Serper:\n{serper}\n\n"
-        if translated.lower() in docs.lower():
-            combined_context += f"📄 Document match:\n{docs}"
+        combined = ""
+        if wiki: combined += f"📚 Wikipedia:\n{wiki}\n\n"
+        if news: combined += f"📰 News:\n{news}\n\n"
+        if serper: combined += f"🌐 Web:\n{serper}\n\n"
+        if doc_context: combined += f"📄 Documents:\n{doc_context}"
 
-        answer = ask_groq(translated, combined_context.strip())
-
+        answer = ask_groq(translated, combined.strip())
         st.chat_message("assistant").write(answer)
         st.session_state.chat_history.append({"role": "assistant", "content": answer})
         save_memory(st.session_state.chat_history)
