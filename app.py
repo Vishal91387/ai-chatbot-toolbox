@@ -4,29 +4,20 @@ import fitz  # PyMuPDF
 import re
 import json
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
-HEAD
-e9b7c1c (Sanitized API keys and secured credentials)
-# === API Keys (now loaded from environment variables) ===
 API_KEY = os.getenv("GROQ_API_KEY")
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 SERPER_KEY = os.getenv("SERPER_KEY")
-HEAD
 
-# === API Keys ===
-API_KEY = "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"
-NEWSAPI_KEY = "3ca3c24b0bf743b28f2ea537701d37c3"
-SERPER_KEY = "b85c03c20472fad945f80e4005c976ce39c6fdad"
-0bd705e (Initial commit of AI Toolbox)
-e9b7c1c (Sanitized API keys and secured credentials)
-
-# === Sidebar Key Check (Improved with Expander) ===
 with st.sidebar.expander("🔐 API Key Status", expanded=True):
     st.text(f"GROQ_API_KEY loaded: {'✅' if API_KEY else '❌'}")
     st.text(f"NEWSAPI_KEY loaded: {'✅' if NEWSAPI_KEY else '❌'}")
     st.text(f"SERPER_KEY loaded: {'✅' if SERPER_KEY else '❌'}")
 
-# === Endpoints ===
+st.sidebar.write("📂 Working Directory:", os.getcwd())
+
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 SERPER_URL = "https://google.serper.dev/search"
 WIKIPEDIA_URL = "https://en.wikipedia.org/api/rest_v1/page/summary/"
@@ -35,12 +26,12 @@ HEADERS = {
     "Authorization": f"Bearer {API_KEY}",
     "Content-Type": "application/json"
 }
+
 MAX_DOC_CHARS = 5000
 MEMORY_FILE = "chat_memory.json"
 UPLOAD_DIR = "uploaded_docs"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# === Memory Functions ===
 def load_memory():
     if os.path.exists(MEMORY_FILE):
         with open(MEMORY_FILE, "r") as f:
@@ -51,198 +42,180 @@ def save_memory(chat_history):
     with open(MEMORY_FILE, "w") as f:
         json.dump(chat_history, f, indent=2)
 
-# === Wikipedia Helper ===
 def get_wikipedia_summary(query):
     try:
         cleaned_query = re.sub(r'[^a-zA-Z0-9 ]', '', query).strip()
         search_url = f"https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={cleaned_query}&format=json"
-        search_response = requests.get(search_url)
-        results = search_response.json().get("query", {}).get("search", [])
+        results = requests.get(search_url).json().get("query", {}).get("search", [])
         if not results:
             return None
         top_title = results[0]['title'].replace(" ", "_")
         summary_url = WIKIPEDIA_URL + top_title
         res = requests.get(summary_url)
-        if res.status_code == 200:
-            extract = res.json().get("extract", "")
-            if extract:
-                return extract
+        return res.json().get("extract", "") if res.status_code == 200 else None
+    except:
+        return None
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-        # Fallback: Try to use simplified version of the original query
->>>>>>> 0bd705e (Initial commit of AI Toolbox)
-=======
->>>>>>> e9b7c1c (Sanitized API keys and secured credentials)
-        fallback_title = cleaned_query.lower().replace(" ", "_")
-        res_fallback = requests.get(WIKIPEDIA_URL + fallback_title)
-        if res_fallback.status_code == 200:
-            return res_fallback.json().get("extract", "")
-
-    except Exception:
-        pass
-    return None
-
-# === NewsAPI ===
 def get_newsapi_headlines(query):
-    url = "https://newsapi.org/v2/everything"
-    params = {
-        "q": query,
-        "language": "en",
-        "pageSize": 5,
-        "sortBy": "publishedAt",
-        "apiKey": NEWSAPI_KEY
-    }
-    res = requests.get(url, params=params)
-    if res.status_code != 200:
+    try:
+        url = "https://newsapi.org/v2/everything"
+        params = {
+            "q": query,
+            "language": "en",
+            "pageSize": 5,
+            "sortBy": "publishedAt",
+            "apiKey": NEWSAPI_KEY
+        }
+        res = requests.get(url, params=params)
+        articles = res.json().get("articles", []) if res.status_code == 200 else []
+        return "\n".join([f"- {a['title']} ({a['source']['name']}, {a['publishedAt'][:10]})" for a in articles]) if articles else None
+    except:
         return None
-    articles = res.json().get("articles", [])
-    if not articles:
-        return None
-    return "\n".join([f"- {a['title']} (🔕 {a['publishedAt'][:10]}, Source: {a['source']['name']})" for a in articles])
 
-# === Serper Fallback ===
 def get_serper_results(query):
-    headers = {"X-API-KEY": SERPER_KEY, "Content-Type": "application/json"}
-    payload = {"q": query}
-    res = requests.post(SERPER_URL, headers=headers, json=payload)
     try:
-        results = res.json()
-        items = results.get("organic", [])[:3]
+        headers = {"X-API-KEY": SERPER_KEY, "Content-Type": "application/json"}
+        payload = {"q": query}
+        res = requests.post(SERPER_URL, headers=headers, json=payload)
+        items = res.json().get("organic", [])[:3]
         return "\n".join([f"- {r['title']}\n  {r['snippet']}\n  🔗 {r['link']}" for r in items])
-    except Exception:
+    except:
         return None
 
-# === Translator ===
 def translate_to_english(text):
-    payload = {
-        "model": "llama3-70b-8192",
-        "messages": [
-            {"role": "system", "content": "Translate non-English input to English. If already English, return it exactly as-is."},
-            {"role": "user", "content": text}
-        ],
-        "temperature": 0
-    }
-    res = requests.post(GROQ_URL, headers=HEADERS, json=payload)
     try:
+        payload = {
+            "model": "llama3-70b-8192",
+            "messages": [
+                {"role": "system", "content": "Translate non-English input to English. If already English, return it exactly as-is."},
+                {"role": "user", "content": text}
+            ],
+            "temperature": 0
+        }
+        res = requests.post(GROQ_URL, headers=HEADERS, json=payload)
         return res.json()["choices"][0]["message"]["content"].strip()
     except:
         return text
 
-# === Groq Document Q&A ===
-def ask_groq(question, context):
+def ask_groq(question, context=None):
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant that answers based on relevant documents, Wikipedia, and news sources. Do not mix unrelated sources."}
+    ]
+    if context:
+        messages.append({"role": "user", "content": f"Context:\n{context[:MAX_DOC_CHARS]}\n\nQuestion: {question}"})
+    else:
+        messages.append({"role": "user", "content": question})
     payload = {
         "model": "llama3-70b-8192",
-        "messages": [
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": f"{context}\n\nQuestion: {question}"}
-        ],
-        "temperature": 0.4
+        "messages": messages,
+        "temperature": 0.3
     }
-    res = requests.post(GROQ_URL, headers=HEADERS, json=payload)
     try:
+        res = requests.post(GROQ_URL, headers=HEADERS, json=payload)
         return res.json()["choices"][0]["message"]["content"]
     except:
         return "⚠️ No response"
 
-# === Sidebar ===
+def get_all_documents():
+    context = ""
+    for file in os.listdir(UPLOAD_DIR):
+        path = os.path.join(UPLOAD_DIR, file)
+        if file.endswith(".txt"):
+            context += open(path, "r", encoding="utf-8").read() + "\n"
+        elif file.endswith(".pdf"):
+            with fitz.open(path) as doc:
+                context += "\n".join(page.get_text() for page in doc) + "\n"
+    return context
+
+def get_document_context(filename):
+    path = os.path.join(UPLOAD_DIR, filename)
+    if filename.endswith(".txt"):
+        return open(path, "r", encoding="utf-8").read()
+    elif filename.endswith(".pdf"):
+        with fitz.open(path) as doc:
+            return "\n".join(page.get_text() for page in doc)
+    return ""
+
 st.sidebar.title("📂 Document Assistant")
 section = st.sidebar.radio("Go to:", ["💬 Chatbot", "📄 Document Q&A"])
 
+if st.sidebar.button("🧹 Clear Chat History"):
+    st.session_state.chat_history = []
+    save_memory([])
+    st.rerun()
+
 uploaded_file = st.sidebar.file_uploader("Upload .txt or .pdf", type=["txt", "pdf"])
-document_text = ""
-
-# 🔁 Load previously uploaded documents for selection
-doc_choices = [f for f in os.listdir(UPLOAD_DIR) if f.endswith((".txt", ".pdf"))]
-selected_doc = st.sidebar.selectbox("📑 Choose a saved document:", ["None"] + doc_choices)
-
-if selected_doc != "None":
-    doc_path = os.path.join(UPLOAD_DIR, selected_doc)
-    if selected_doc.endswith(".txt"):
-        document_text = open(doc_path, "r", encoding="utf-8").read()
-    elif selected_doc.endswith(".pdf"):
-        with fitz.open(doc_path) as doc:
-            document_text = "\n".join(page.get_text() for page in doc)
-    st.sidebar.success(f"Selected: {selected_doc}")
-
-# 📥 Save newly uploaded document
 if uploaded_file:
     file_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
-    with open(file_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    st.sidebar.success(f"Uploaded & saved: {uploaded_file.name}")
+    if not os.path.exists(file_path):
+        with open(file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        st.sidebar.success(f"✅ Saved: {uploaded_file.name}")
+        st.rerun()
 
-# === Chatbot UI ===
+if st.sidebar.button("📤 Push to GitHub"):
+    os.system("git add uploaded_docs/*")
+    os.system("git commit -m 'Add uploaded document(s)'")
+    os.system("git push origin main")
+    st.sidebar.success("✅ Pushed uploaded documents to GitHub")
+
+if section == "📄 Document Q&A":
+    st.title("📄 Ask Questions About Your Uploaded Document")
+
+    doc_files = [f for f in os.listdir(UPLOAD_DIR) if f.endswith((".txt", ".pdf"))]
+    selected = st.selectbox("📑 Select document to query:", ["All"] + doc_files, index=0)
+
+    question = st.text_input("What do you want to know?")
+    if question:
+        with st.spinner("Reading documents..."):
+            translated = translate_to_english(question)
+            if selected == "All":
+                all_docs = {f: get_document_context(f) for f in doc_files}
+                matching_docs = [text for name, text in all_docs.items() if re.search(translated[:40], text, re.IGNORECASE)]
+                context = "\n\n".join(matching_docs)
+            else:
+                context = get_document_context(selected)
+            answer = ask_groq(translated, context)
+            st.subheader("💡 Answer:")
+            st.write(answer)
+
 if section == "💬 Chatbot":
-    st.title("🧐 AI Chatbot with Real-Time + Wikipedia Intelligence")
+    st.title("🧠 AI Chatbot with Smart Context")
 
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = load_memory()
         if not st.session_state.chat_history:
-            st.session_state.chat_history = [{"role": "system", "content": "You are a helpful assistant with live and historical knowledge."}]
+            st.session_state.chat_history = [
+                {"role": "system", "content": "You are a smart AI assistant with access to documents, Wikipedia, and real-time news. You handle questions like who, what, when, how many, how long, tell me how, tell me why, etc."}
+            ]
 
     for msg in st.session_state.chat_history[1:]:
         st.chat_message(msg["role"]).write(msg["content"])
 
-    chat_input = st.chat_input("Ask me anything...")
+    chat_input = st.chat_input("Ask your assistant...")
     if chat_input:
         st.chat_message("user").write(chat_input)
         st.session_state.chat_history.append({"role": "user", "content": chat_input})
 
         translated = translate_to_english(chat_input)
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-        # Detect educational queries
->>>>>>> 0bd705e (Initial commit of AI Toolbox)
-=======
->>>>>>> e9b7c1c (Sanitized API keys and secured credentials)
-        is_educational = any(k in translated.lower() for k in ["what is", "who is", "who was", "explain", "define", "history of", "origin of", "when did", "how did"])
+        wiki = get_wikipedia_summary(translated)
+        news = get_newsapi_headlines(translated)
+        serper = get_serper_results(translated)
+        docs = get_all_documents()
 
-        if is_educational:
-            info = get_wikipedia_summary(translated)
-        else:
-            info = get_newsapi_headlines(translated) or get_serper_results(translated)
+        combined_context = ""
+        if wiki:
+            combined_context += f"📚 Wikipedia:\n{wiki}\n\n"
+        if news:
+            combined_context += f"📡 NewsAPI:\n{news}\n\n"
+        if serper:
+            combined_context += f"🌐 Serper:\n{serper}\n\n"
+        if translated.lower() in docs.lower():
+            combined_context += f"📄 Document match:\n{docs}"
 
-        context = info if info else "No relevant information found."
+        answer = ask_groq(translated, combined_context.strip())
 
-        prompt = (
-            "IMPORTANT: Answer using ONLY the context provided below. Avoid internal knowledge unless necessary.\n\n"
-            f"Context:\n{context}\n\nQuestion: {translated}"
-        )
-
-        payload = {
-            "model": "llama3-70b-8192",
-            "messages": [
-                {"role": "system", "content": "You are an intelligent assistant."},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.3
-        }
-
-        with st.spinner("Thinking..."):
-            res = requests.post(GROQ_URL, headers=HEADERS, json=payload)
-            try:
-                reply = res.json()["choices"][0]["message"]["content"]
-            except:
-                reply = "⚠️ No response"
-
-        st.chat_message("assistant").write(reply)
-        st.session_state.chat_history.append({"role": "assistant", "content": reply})
+        st.chat_message("assistant").write(answer)
+        st.session_state.chat_history.append({"role": "assistant", "content": answer})
         save_memory(st.session_state.chat_history)
-
-# === Document Q&A UI ===
-if section == "📄 Document Q&A":
-    st.title("📄 Ask Questions About Your Uploaded Document")
-
-    if not document_text:
-        st.warning("Please upload or select a document first.")
-    else:
-        q = st.text_input("What do you want to know?")
-        if q:
-            with st.spinner("Reading..."):
-                a = ask_groq(q, document_text)
-                st.subheader("💡 Answer:")
-                st.write(a)
